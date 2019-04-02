@@ -1,10 +1,10 @@
 package com.sderosiaux
 
-import com.sderosiaux.Saga.{JobData, SagaId, TaskId}
+import com.sderosiaux.Saga.{SagaId, TaskId}
 import com.sderosiaux.SagaMessageType._
 
 // TODO: remove the subtype and make a proper ADT
-case class SagaMessage(id: SagaId, messageType: SagaMessageType, data: Option[Data] = None, taskId: Option[TaskId] = None)
+case class SagaMessage(sagaId: SagaId, messageType: SagaMessageType, data: Option[Data] = None, taskId: Option[TaskId] = None)
 
 object SagaMessage {
   def startSaga(id: SagaId, job: Data): SagaMessage = SagaMessage(id, StartSaga, Some(job))

@@ -1,12 +1,13 @@
 package com.sderosiaux
 
 import cats.Show
-import com.sderosiaux.Saga.{JobData, SagaId, TaskId}
+import com.sderosiaux.Saga.{SagaId, TaskId}
 import com.sderosiaux.SagaErrors.InvalidSagaStateError
 import com.sderosiaux.SagaMessageType._
 import com.sderosiaux.TaskState.{CompTaskCompleted, CompTaskStarted, TaskCompleted, TaskStarted}
 
 import scala.collection.mutable
+import scala.collection.mutable.ListBuffer
 
 // TODO: pretty sure "Task" is missing (to contain its state and data, and toString ;)
 
@@ -25,17 +26,18 @@ object TaskData {
   def empty() = TaskData(None, None, None, None)
 }
 
-case class SagaState(sagaId: SagaId, job: Option[Data], taskData: mutable.Map[TaskId, TaskData], taskState: mutable.Map[TaskId, TaskState], aborted: Boolean, completed: Boolean) {
+// TODO: the taskState should not be a List but a simple State
+case class SagaState(sagaId: SagaId, job: Option[Data], taskData: mutable.Map[TaskId, TaskData], taskState: mutable.Map[TaskId, mutable.ListBuffer[TaskState]], var aborted: Boolean, var completed: Boolean) {
 
   def taskIds(): List[TaskId] = taskState.keys.toList
-  def isTaskStarted(taskId: TaskId): Boolean = taskState.get(taskId).contains(TaskStarted)
+  def isTaskStarted(taskId: TaskId): Boolean = taskState.get(taskId).exists(_.contains(TaskStarted))
   def startTaskData(taskId: TaskId): Option[Data] = taskData.get(taskId).flatMap(_.taskStart)
-  def isTaskCompleted(taskId: TaskId): Boolean = taskState.get(taskId).contains(TaskCompleted)
+  def isTaskCompleted(taskId: TaskId): Boolean = taskState.get(taskId).exists(_.contains(TaskCompleted))
   def endTaskData(taskId: TaskId): Option[Data] = taskData.get(taskId).flatMap(_.taskEnd)
 
-  def isCompTaskStarted(taskId: TaskId): Boolean = taskState.get(taskId).contains(CompTaskStarted)
+  def isCompTaskStarted(taskId: TaskId): Boolean = taskState.get(taskId).exists(_.contains(CompTaskStarted))
   def startCompTaskData(taskId: TaskId): Option[Data] = taskData.get(taskId).flatMap(_.compTaskStart)
-  def isCompTaskCompleted(taskId: TaskId): Boolean = taskState.get(taskId).contains(CompTaskCompleted)
+  def isCompTaskCompleted(taskId: TaskId): Boolean = taskState.get(taskId).exists(_.contains(CompTaskCompleted))
   def endCompTaskData(taskId: TaskId): Option[Data] = taskData.get(taskId).flatMap(_.compTaskEnd)
 
   def isSagaInSafeState(): Boolean = aborted || !taskState.keys.exists { taskId => isTaskStarted(taskId) && !isTaskCompleted(taskId) }
@@ -55,35 +57,37 @@ case class SagaState(sagaId: SagaId, job: Option[Data], taskData: mutable.Map[Ta
     }
   }
 
-  def validateAndUpdate(msg: SagaMessage): Unit = {
-    // \__O__/
-    validateSagaUpdate(msg).map { _ => updateState(msg) }
+  def validateAndUpdate(msg: SagaMessage): Either[Throwable, Unit] = {
+    val res = validateSagaUpdate(msg)
+    res.foreach { _ => processMessage(msg) } // TODO: OMG!
+    res
   }
 
-  def updateState(msg: SagaMessage): Unit = msg.messageType match {
-    case SagaMessageType.EndSaga => copy(completed = true)
-    case SagaMessageType.AbortSaga => copy(aborted = true)
+  // TODO: should be pure: returns SagaMessage and remove addTaskData
+  def processMessage(msg: SagaMessage): Unit = msg.messageType match {
+    case SagaMessageType.EndSaga => completed = true
+    case SagaMessageType.AbortSaga => aborted = true
 
     case SagaMessageType.StartTask =>
-      taskState(msg.taskId.get) = TaskStarted
+      taskState(msg.taskId.get) = ListBuffer(TaskStarted)
       msg.data.foreach { d => addTaskData(msg.taskId.get, msg.messageType, d)}
 
     case SagaMessageType.EndTask =>
-      taskState(msg.taskId.get) = taskState.getOrElseUpdate(msg.taskId.get, TaskCompleted)
+      taskState(msg.taskId.get) += TaskCompleted
       msg.data.foreach { d => addTaskData(msg.taskId.get, msg.messageType, d)}
 
     case SagaMessageType.StartCompTask =>
-      taskState(msg.taskId.get) = taskState.getOrElseUpdate(msg.taskId.get, CompTaskStarted)
+      taskState(msg.taskId.get) += CompTaskStarted
       msg.data.foreach { d => addTaskData(msg.taskId.get, msg.messageType, d)}
 
     case SagaMessageType.EndCompTask =>
       msg.data.foreach { d => addTaskData(msg.taskId.get, msg.messageType, d)}
-      taskState(msg.taskId.get) = taskState.getOrElseUpdate(msg.taskId.get, CompTaskCompleted)
+      taskState(msg.taskId.get) += CompTaskCompleted
 
     case _ => ???
   }
 
-  def validateSagaUpdate(msg: SagaMessage): Either[Exception, Unit] = msg.messageType match {
+  def validateSagaUpdate(msg: SagaMessage): Either[Throwable, Unit] = msg.messageType match {
     case StartSaga =>
       Left(InvalidSagaStateError("Cannot apply a StartSaga Message to an already existing Saga"))
 
