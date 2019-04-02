@@ -1,9 +1,12 @@
 package com.sderosiaux
 
+import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.{Executors, ThreadFactory}
 
 import cats.MonadError
+import cats.effect.{ConcurrentEffect, Effect, Sync}
 import cats.implicits._
+import cats.effect.implicits._
 import com.sderosiaux.Saga.{SagaId, TaskId}
 import com.sderosiaux.SagaMessageType._
 
@@ -15,7 +18,7 @@ object Saga {
   type SagaId = String
   type TaskId = String
 
-  def create[F[_] : MonadError[?[_], Throwable]](id: SagaId, log: SagaLog[F], data: Data): F[Saga[F]] = {
+  def create[F[_] : Effect](id: SagaId, log: SagaLog[F], data: Data): F[Saga[F]] = {
 
     val state = SagaState.create(id, data)
     val q = mutable.Queue[SagaMessage]()
@@ -28,7 +31,7 @@ object Saga {
   }
 
   // recreate an existing Saga (no logging)
-  def rehydrate[F[_] : MonadError[?[_], Throwable]](sagaId: SagaId, state: SagaState, log: SagaLog[F]): Saga[F] = {
+  def rehydrate[F[_] : Effect](sagaId: SagaId, state: SagaState, log: SagaLog[F]): Saga[F] = {
     val q = mutable.Queue[SagaMessage]()
     val saga = Saga(sagaId, log, state, q)
     if (!saga.state.completed) {
@@ -38,50 +41,51 @@ object Saga {
   }
 }
 
-case class Saga[F[_] : MonadError[?[_], Throwable]](id: SagaId, log: SagaLog[F], state: SagaState, queue: mutable.Queue[SagaMessage]) {
+case class Saga[F[_] : Effect](id: SagaId, log: SagaLog[F], state: SagaState, queue: mutable.Queue[SagaMessage]) {
   // chan updateCh sagaUpdate
   // mutex: RWMutex
 
-  var looping = true
+  var looping = new AtomicBoolean(true)
 
   def startLoop(): Unit = {
     ExecutionContext.global.execute { () =>
-      while (looping) {
+      while (looping.get()) {
         if (queue.nonEmpty) {
-          log(queue.dequeue())
+          log(queue.dequeue()).toIO.unsafeRunSync()
         }
-        Thread.sleep(1000)
+        Thread.sleep(10)
       }
     }
   }
 
   def end(): Unit = {
-    state.processMessage(SagaMessage(id, SagaMessageType.EndSaga))
+    processMessage(SagaMessage(id, SagaMessageType.EndSaga))
   }
 
   def abort(): Unit = {
-    state.processMessage(SagaMessage(id, SagaMessageType.AbortSaga))
+    processMessage(SagaMessage(id, SagaMessageType.AbortSaga))
   }
 
   def startTask(taskId: TaskId, data: Data): Unit = {
-    state.processMessage(SagaMessage(id, SagaMessageType.StartTask, Some(data), Some(taskId)))
+    processMessage(SagaMessage(id, SagaMessageType.StartTask, Some(data), Some(taskId)))
   }
 
   def endTask(taskId: TaskId, result: Data): Unit = {
-    state.processMessage(SagaMessage(id, SagaMessageType.EndTask, Some(result), Some(taskId)))
+    processMessage(SagaMessage(id, SagaMessageType.EndTask, Some(result), Some(taskId)))
   }
 
   def startCompensatingTask(taskId: TaskId, data: Data): Unit = {
-    state.processMessage(SagaMessage(id, SagaMessageType.StartCompTask, Some(data), Some(taskId)))
+    processMessage(SagaMessage(id, SagaMessageType.StartCompTask, Some(data), Some(taskId)))
   }
 
   def endCompensatingTask(taskId: TaskId, result: Data): Unit = {
-    state.processMessage(SagaMessage(id, SagaMessageType.EndCompTask, Some(result), Some(taskId)))
+    processMessage(SagaMessage(id, SagaMessageType.EndCompTask, Some(result), Some(taskId)))
   }
 
   def processMessage(message: SagaMessage): Unit = {
+    queue.enqueue(message) // Should F[Unit]
     message.messageType match {
-      case EndSaga => looping = false
+      case EndSaga => looping.set(false)
       case _ =>
     }
   }
@@ -89,6 +93,6 @@ case class Saga[F[_] : MonadError[?[_], Throwable]](id: SagaId, log: SagaLog[F],
   def log(msg: SagaMessage): F[Unit] = for {
     _ <- state.validateSagaUpdate(msg).raiseOrPure[F]
     res <- log.logMessage(msg)
-    _ <- state.processMessage(msg).pure[F] // TODO: should be RT
+    _ <- state.updateState(msg).pure[F] // TODO: should be RT
   } yield res
 }

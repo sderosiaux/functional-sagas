@@ -59,12 +59,12 @@ case class SagaState(sagaId: SagaId, job: Option[Data], taskData: mutable.Map[Ta
 
   def validateAndUpdate(msg: SagaMessage): Either[Throwable, Unit] = {
     val res = validateSagaUpdate(msg)
-    res.foreach { _ => processMessage(msg) } // TODO: OMG!
+    res.foreach { _ => updateState(msg) } // TODO: OMG!
     res
   }
 
   // TODO: should be pure: returns SagaMessage and remove addTaskData
-  def processMessage(msg: SagaMessage): Unit = msg.messageType match {
+  def updateState(msg: SagaMessage): Unit = msg.messageType match {
     case SagaMessageType.EndSaga => completed = true
     case SagaMessageType.AbortSaga => aborted = true
 

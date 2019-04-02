@@ -9,7 +9,7 @@ import cats.implicits._
 
 class InMemorySagaLog(existingLogs: Map[SagaId, List[SagaMessage]] = Map()) extends SagaLog[IO] {
 
-  private val logs = mutable.Map[SagaId, ListBuffer[SagaMessage]]()
+  val logs = mutable.Map[SagaId, ListBuffer[SagaMessage]]()
   existingLogs.foreach { case (id, msgs) => logs.put(id, msgs.to[ListBuffer]) }
 
   override def startSaga(sagaId: SagaId, job: Data): IO[Unit] = {

@@ -1,6 +1,6 @@
 package com.sderosiaux
 
-import cats.effect.{IO, Sync}
+import cats.effect.{Effect, IO, Sync}
 import cats.implicits._
 import com.sderosiaux.Saga.SagaId
 import com.sderosiaux.SagaMessageType.StartSaga
@@ -23,7 +23,7 @@ object SagaCoordinator {
 }
 
 
-case class SagaCoordinator[F[_] : Sync](log: SagaLog[F]) {
+case class SagaCoordinator[F[_] : Effect](log: SagaLog[F]) {
   def createSaga(id: SagaId, task: Data): F[Saga[F]] = Saga.create(id, log, task)
 
   def activeSagas(): F[List[SagaId]] = log.activeSagas()

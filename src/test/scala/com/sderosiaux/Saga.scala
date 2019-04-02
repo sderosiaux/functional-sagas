@@ -1,6 +1,7 @@
 package com.sderosiaux
 
 import com.sderosiaux.SagaMessage._
+import com.sderosiaux.SagaMessageType.StartSaga
 import com.sderosiaux.SagaRecoveryType.ForwardRecovery
 import org.scalatest.{FlatSpec, Matchers}
 
@@ -26,14 +27,24 @@ class SagaTest extends FlatSpec with Matchers {
   }
 
   "Sagas" should "abort" in {
-    val existingLogs = Map(sagaId -> List(startSaga(sagaId, data), abortSaga(sagaId)))
-    val coord = SagaCoordinator(new InMemorySagaLog(existingLogs))
+    val log = new InMemorySagaLog()
+    val coord = SagaCoordinator(log)
     val saga = coord.createSaga(sagaId, data).unsafeRunSync()
 
+    saga.startTask(taskId, data)
     saga.abort()
+    saga.startCompensatingTask(taskId, data)
+    saga.endCompensatingTask(taskId, data)
 
-    saga.id shouldBe sagaId
-    saga.state.completed shouldBe false
-    saga.state.aborted shouldBe true
+    Thread.sleep(200)
+
+    val messages = log.messages(sagaId).unsafeRunSync()
+    messages.head shouldBe startSaga(sagaId, data)
+    messages(1) shouldBe startTask(sagaId, taskId, data)
+    messages(2) shouldBe abortSaga(sagaId)
+    messages(3) shouldBe startCompTask(sagaId, taskId, data)
+    messages(4) shouldBe endCompTask(sagaId, taskId, data)
+
+    saga.state.isCompTaskCompleted(taskId) shouldBe true
   }
 }
