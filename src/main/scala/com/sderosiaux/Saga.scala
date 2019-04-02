@@ -41,17 +41,14 @@ object Saga {
   }
 }
 
-case class Saga[F[_] : Effect](id: SagaId, log: SagaLog[F], state: SagaState, queue: mutable.Queue[SagaMessage]) {
-  // chan updateCh sagaUpdate
-  // mutex: RWMutex
-
+case class Saga[F[_] : Effect](id: SagaId, log: SagaLog[F], var state: SagaState, queue: mutable.Queue[SagaMessage]) {
   var looping = new AtomicBoolean(true)
 
   def startLoop(): Unit = {
     ExecutionContext.global.execute { () =>
       while (looping.get()) {
         if (queue.nonEmpty) {
-          log(queue.dequeue()).toIO.unsafeRunSync()
+          val newSaga = log(queue.dequeue()).toIO.unsafeRunSync()
         }
         Thread.sleep(10)
       }
@@ -90,9 +87,9 @@ case class Saga[F[_] : Effect](id: SagaId, log: SagaLog[F], state: SagaState, qu
     }
   }
 
-  def log(msg: SagaMessage): F[Unit] = for {
+  def log(msg: SagaMessage): F[Saga[F]] = for {
     _ <- state.validateSagaUpdate(msg).raiseOrPure[F]
-    res <- log.logMessage(msg)
-    _ <- state.updateState(msg).pure[F] // TODO: should be RT
-  } yield res
+    _ <- log.logMessage(msg)
+    saga <- copy(state = state.processMessage(msg)).pure[F]
+  } yield saga
 }

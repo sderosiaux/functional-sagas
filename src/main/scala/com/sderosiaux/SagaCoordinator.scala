@@ -17,8 +17,8 @@ object SagaRecoveryType {
 }
 
 object SagaCoordinator {
-  def createInMemory(): SagaCoordinator[IO] = {
-    SagaCoordinator(new InMemorySagaLog())
+  def createInMemory(existingLogs: Map[SagaId, List[SagaMessage]] = Map()): IO[SagaCoordinator[IO]] = {
+    InMemorySagaLog.create().map(SagaCoordinator(_))
   }
 }
 
@@ -49,9 +49,7 @@ case class SagaCoordinator[F[_] : Effect](log: SagaLog[F]) {
       else
         ().pure[F]
       state <- SagaState.create(id, msgs.head.data.get).pure[F] // TODO: Ouch!
-      _ <- msgs.drop(1).foreach { msg =>
-        state.validateAndUpdate(msg) // TODO: missing Either validation
-      }.pure[F]
+      _ <- msgs.drop(1).foreach { msg => state.validateAndUpdateForRecoveryNoLog(msg) }.pure[F] // TODO: missing Either validation
     } yield state
   }
 }
