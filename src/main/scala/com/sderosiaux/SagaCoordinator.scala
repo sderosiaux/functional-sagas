@@ -1,7 +1,7 @@
 package com.sderosiaux
 
 import cats.MonadError
-import cats.effect.{Effect, IO, Sync}
+import cats.effect._
 import cats.implicits._
 import com.sderosiaux.Saga.SagaId
 import com.sderosiaux.SagaMessageType.StartSaga
@@ -19,12 +19,13 @@ object SagaRecoveryType {
 
 object SagaCoordinator {
   def createInMemory(existingLogs: Map[SagaId, List[SagaMessage]] = Map()): IO[SagaCoordinator[IO]] = {
+    implicit val cs = cats.effect.IO.contextShift(scala.concurrent.ExecutionContext.Implicits.global)
     InMemorySagaLog.create(existingLogs).map(SagaCoordinator(_))
   }
 }
 
 
-case class SagaCoordinator[F[_] : Effect](log: SagaLog[F]) {
+case class SagaCoordinator[F[_] : ConcurrentEffect](log: SagaLog[F]) {
   def createSaga(id: SagaId, task: Data): F[Saga[F]] = Saga.create(id, log, task)
 
   def activeSagas(): F[List[SagaId]] = log.activeSagas()
@@ -33,7 +34,7 @@ case class SagaCoordinator[F[_] : Effect](log: SagaLog[F]) {
   def recoverSaga(id: SagaId, recoveryType: SagaRecoveryType): F[Saga[F]] = {
     for {
       state <- recoverState(id)
-      saga <- Saga.rehydrate(id, state, log).pure[F]
+      saga <- Saga.rehydrate(id, state, log)
       _ <- recoveryType match {
         case RollbackRecovery => if (!saga.state.isSagaInSafeState()) saga.abort().pure[F] // compensating effect should start
         else ().pure[F]
