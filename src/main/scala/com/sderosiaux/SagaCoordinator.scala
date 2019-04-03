@@ -45,23 +45,14 @@ case class SagaCoordinator[F[_] : Effect](log: SagaLog[F]) {
   private def recoverState(id: SagaId): F[SagaState] = {
     for {
       msgs <- log.messages(id)
-      _ <- Effect[F].errorIf(msgs.isEmpty)(new Exception("No message to recover from"))
-      _ <- Effect[F].errorIf(msgs.head.messageType != StartSaga)(new Exception("First message must be startSaga"))
+      _ <- Either.cond(msgs.nonEmpty, (), new Throwable("No message to recover from")).raiseOrPure[F]
+      _ <- Either.cond(msgs.head.messageType == StartSaga, (), new Throwable("First message must be startSaga")).raiseOrPure[F]
       state <- SagaState.create(id, msgs.head.data.get).pure[F]
       newStateOrError = msgs.drop(1).foldLeft(state.asRight[Throwable]) { (oldState, msg) => oldState.flatMap(_.validateAndUpdateForRecoveryNoLog(msg)) }
       newState <- newStateOrError.pure[F].rethrow
     } yield newState
   }
 
-  implicit class RichMonadError[F[_], E](M: MonadError[F, E]) {
-    def errorIf(cond: Boolean)(e: E): F[Unit] = {
-      if (cond) {
-        M.raiseError[Unit](e)
-      } else {
-        M.pure(())
-      }
-    }
-  }
 
 }
 

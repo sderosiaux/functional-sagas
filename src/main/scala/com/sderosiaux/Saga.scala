@@ -56,33 +56,33 @@ case class Saga[F[_] : Effect](id: SagaId, log: SagaLog[F], var state: SagaState
   }
 
   def end(): Unit = {
-    processMessage(SagaMessage(id, SagaMessageType.EndSaga))
+    enqueueMessage(SagaMessage(id, SagaMessageType.EndSaga))
   }
 
   def abort(): Unit = {
-    processMessage(SagaMessage(id, SagaMessageType.AbortSaga))
+    enqueueMessage(SagaMessage(id, SagaMessageType.AbortSaga))
   }
 
   def startTask(taskId: TaskId, data: Data): Unit = {
-    processMessage(SagaMessage(id, SagaMessageType.StartTask, Some(data), Some(taskId)))
+    enqueueMessage(SagaMessage(id, SagaMessageType.StartTask, Some(data), Some(taskId)))
   }
 
   def endTask(taskId: TaskId, result: Data): Unit = {
-    processMessage(SagaMessage(id, SagaMessageType.EndTask, Some(result), Some(taskId)))
+    enqueueMessage(SagaMessage(id, SagaMessageType.EndTask, Some(result), Some(taskId)))
   }
 
   def startCompensatingTask(taskId: TaskId, data: Data): Unit = {
-    processMessage(SagaMessage(id, SagaMessageType.StartCompTask, Some(data), Some(taskId)))
+    enqueueMessage(SagaMessage(id, SagaMessageType.StartCompTask, Some(data), Some(taskId)))
   }
 
   def endCompensatingTask(taskId: TaskId, result: Data): Unit = {
-    processMessage(SagaMessage(id, SagaMessageType.EndCompTask, Some(result), Some(taskId)))
+    enqueueMessage(SagaMessage(id, SagaMessageType.EndCompTask, Some(result), Some(taskId)))
   }
 
-  def processMessage(message: SagaMessage): Unit = {
-    queue.enqueue(message) // Should F[Unit]
+  def enqueueMessage(message: SagaMessage): Unit = {
+    queue.enqueue(message) // TODO: not RT
     message.messageType match {
-      case EndSaga => looping.set(false)
+      case EndSaga => looping.set(false) // TODO: not RT
       case _ =>
     }
   }
