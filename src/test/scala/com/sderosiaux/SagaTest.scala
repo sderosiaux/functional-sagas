@@ -12,15 +12,19 @@ class SagaTest extends FlatSpec with Matchers {
   val taskId = "my lonely task"
 
   "Saga" should "work" in {
-    val coord = SagaCoordinator.createInMemory().unsafeRunSync()
-    val saga = coord.createSaga(sagaId, data).unsafeRunSync()
+    val saga = (for {
+      coord <- SagaCoordinator.createInMemory()
+      saga <- coord.createSaga(sagaId, data)
+    } yield saga).unsafeRunSync()
     saga.id shouldBe sagaId
   }
 
   "Sagas" should "be recoverable" in {
     val existingLogs = Map(sagaId -> List(startSaga(sagaId, data), startTask(sagaId, taskId, data), endTask(sagaId, taskId, data), endSaga(sagaId)))
-    val coord = SagaCoordinator.createInMemory(existingLogs).unsafeRunSync()
-    val saga = coord.recoverSaga(sagaId, ForwardRecovery).unsafeRunSync()
+    val saga = (for {
+      coord <- SagaCoordinator.createInMemory(existingLogs)
+      saga <- coord.recoverSaga(sagaId, ForwardRecovery)
+    } yield saga).unsafeRunSync()
 
     saga.id shouldBe sagaId
     saga.state.completed shouldBe true

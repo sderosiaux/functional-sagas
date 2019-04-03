@@ -1,5 +1,6 @@
 package com.sderosiaux
 
+import cats.MonadError
 import cats.effect.{Effect, IO, Sync}
 import cats.implicits._
 import com.sderosiaux.Saga.SagaId
@@ -18,7 +19,7 @@ object SagaRecoveryType {
 
 object SagaCoordinator {
   def createInMemory(existingLogs: Map[SagaId, List[SagaMessage]] = Map()): IO[SagaCoordinator[IO]] = {
-    InMemorySagaLog.create().map(SagaCoordinator(_))
+    InMemorySagaLog.create(existingLogs).map(SagaCoordinator(_))
   }
 }
 
@@ -43,15 +44,25 @@ case class SagaCoordinator[F[_] : Effect](log: SagaLog[F]) {
 
   private def recoverState(id: SagaId): F[SagaState] = {
     for {
-      msgs <- log.messages(id) // TODO: if msgs is empty, Ouch!
-      _ <- if (msgs.head.messageType != StartSaga)
-        new Exception("First message must be startSaga").raiseError[F, Unit]
-      else
-        ().pure[F]
-      state <- SagaState.create(id, msgs.head.data.get).pure[F] // TODO: Ouch!
-      _ <- msgs.drop(1).foreach { msg => state.validateAndUpdateForRecoveryNoLog(msg) }.pure[F] // TODO: missing Either validation
-    } yield state
+      msgs <- log.messages(id)
+      _ <- Effect[F].errorIf(msgs.isEmpty)(new Exception("No message to recover from"))
+      _ <- Effect[F].errorIf(msgs.head.messageType != StartSaga)(new Exception("First message must be startSaga"))
+      state <- SagaState.create(id, msgs.head.data.get).pure[F]
+      newStateOrError = msgs.drop(1).foldLeft(state.asRight[Throwable]) { (oldState, msg) => oldState.flatMap(_.validateAndUpdateForRecoveryNoLog(msg)) }
+      newState <- newStateOrError.pure[F].rethrow
+    } yield newState
   }
+
+  implicit class RichMonadError[F[_], E](M: MonadError[F, E]) {
+    def errorIf(cond: Boolean)(e: E): F[Unit] = {
+      if (cond) {
+        M.raiseError[Unit](e)
+      } else {
+        M.pure(())
+      }
+    }
+  }
+
 }
 
 
