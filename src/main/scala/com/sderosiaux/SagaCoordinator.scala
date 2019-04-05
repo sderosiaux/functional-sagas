@@ -26,21 +26,22 @@ object SagaCoordinator {
 
 
 case class SagaCoordinator[F[_] : ConcurrentEffect](log: SagaLog[F]) {
-  def createSaga(id: SagaId, task: Data): F[Saga[F]] = Saga.create(id, log, task)
+  def createSaga(id: SagaId, task: Data): F[(Saga[F], Fiber[F, Saga[F]])] = Saga.create(id, log, task)
 
   def activeSagas(): F[List[SagaId]] = log.activeSagas()
 
   // TODO: we recover a State, not a Saga here
   def recoverSaga(id: SagaId, recoveryType: SagaRecoveryType): F[Saga[F]] = {
-    for {
-      state <- recoverState(id)
-      saga <- Saga.rehydrate(id, state, log)
-      _ <- recoveryType match {
-        case RollbackRecovery => if (!saga.state.isSagaInSafeState()) saga.abort().pure[F] // compensating effect should start
-        else ().pure[F]
-        case ForwardRecovery => ().pure[F]
-      }
-    } yield saga
+    ???
+//    for {
+//      state <- recoverState(id)
+//      saga <- Saga.rehydrate(id, state, log)
+//      _ <- recoveryType match {
+//        case RollbackRecovery => if (!saga.state.isSagaInSafeState()) saga.abort().pure[F] // compensating effect should start
+//        else ().pure[F]
+//        case ForwardRecovery => ().pure[F]
+//      }
+//    } yield saga
   }
 
   private def recoverState(id: SagaId): F[SagaState] = {

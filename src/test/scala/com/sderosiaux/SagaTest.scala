@@ -7,7 +7,8 @@ import com.sderosiaux.SagaRecoveryType.ForwardRecovery
 import org.scalatest.{FlatSpec, Matchers}
 
 class SagaTest extends FlatSpec with Matchers {
-    val data = new Data {}
+    val data = new Data {
+      override def toString: String = "data" }
     val sagaId = "my saga"
     val taskId = "my lonely task"
 
@@ -16,7 +17,7 @@ class SagaTest extends FlatSpec with Matchers {
             coord <- SagaCoordinator.createInMemory()
             saga <- coord.createSaga(sagaId, data)
         } yield saga).unsafeRunSync()
-        saga.id shouldBe sagaId
+        saga._1.id shouldBe sagaId
     }
 
     "Sagas" should "be recoverable" in {
@@ -32,15 +33,17 @@ class SagaTest extends FlatSpec with Matchers {
     }
 
     "Sagas" should "abort" in {
-        val (saga, messages) = (for {
+        val (saga, sagaAfter, messages) = (for {
             coord <- SagaCoordinator.createInMemory()
-            saga <- coord.createSaga(sagaId, data)
+            res <- coord.createSaga(sagaId, data)
+            (saga, fiber) = res
             _ <- saga.startTask(taskId, data)
             _ <- saga.abort()
             _ <- saga.startCompensatingTask(taskId, data)
             _ <- saga.endCompensatingTask(taskId, data)
+            sagaAfter <- fiber.join
             messages <- coord.log.messages(sagaId)
-        } yield (saga, messages)).unsafeRunSync()
+        } yield (saga, sagaAfter, messages)).unsafeRunSync()
 
         messages.head shouldBe startSaga(sagaId, data)
         messages(1) shouldBe startTask(sagaId, taskId, data)
